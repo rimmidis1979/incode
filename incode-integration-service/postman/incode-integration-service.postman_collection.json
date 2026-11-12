@@ -1,0 +1,450 @@
+{
+  "info": {
+    "_postman_id": "a7e9b54e-4d89-4e6f-a312-incode001122",
+    "name": "incode-integration-service",
+    "description": "Production-ready Postman collection with pre-request HMAC-SHA256 signing scripts and automated response assertions for incode-integration-service.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8080"
+    },
+    {
+      "key": "webhookSecret",
+      "value": "replace-with-incode-webhook-secret"
+    },
+    {
+      "key": "sessionId",
+      "value": "demo-session-001"
+    },
+    {
+      "key": "externalCustomerId",
+      "value": "cust-10001"
+    },
+    {
+      "key": "workflowConfigurationId",
+      "value": "flow-kyc-standard"
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Health Check (Actuator)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/actuator/health",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "actuator",
+            "health"
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Health endpoint returns 200 OK', function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "",
+              "pm.test('Service status is UP', function () {",
+              "    const json = pm.response.json();",
+              "    pm.expect(json.status).to.eql('UP');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Create Incode Compliance Session",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "X-Correlation-Id",
+            "value": "{{$guid}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"externalCustomerId\": \"{{externalCustomerId}}\",\n  \"workflowConfigurationId\": \"{{workflowConfigurationId}}\",\n  \"region\": \"US\",\n  \"countryCode\": \"USA\",\n  \"metadata\": {\n    \"channel\": \"postman\",\n    \"onboardingTier\": \"standard\"\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/compliance/sessions",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "compliance",
+            "sessions"
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "if (!pm.environment.get('externalCustomerId')) {",
+              "    pm.environment.set('externalCustomerId', 'cust-' + Date.now());",
+              "}"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Returns 201 Created', function () {",
+              "    pm.response.to.have.status(201);",
+              "});",
+              "",
+              "pm.test('Response contains sessionId and workflowId', function () {",
+              "    const json = pm.response.json();",
+              "    pm.expect(json.sessionId).to.be.a('string').and.not.empty;",
+              "    pm.expect(json.workflowId).to.be.a('string').and.not.empty;",
+              "    pm.expect(json.status).to.be.a('string').and.not.empty;",
+              "    pm.environment.set('sessionId', json.sessionId);",
+              "    pm.collectionVariables.set('sessionId', json.sessionId);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Create Session - Validation Error (RFC 7807)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"externalCustomerId\": \"\",\n  \"workflowConfigurationId\": \"\",\n  \"region\": \"INVALID REGION!\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/compliance/sessions",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "compliance",
+            "sessions"
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Returns 400 Bad Request', function () {",
+              "    pm.response.to.have.status(400);",
+              "});",
+              "",
+              "pm.test('Returns RFC 7807 application/problem+json payload', function () {",
+              "    pm.expect(pm.response.headers.get('Content-Type')).to.include('application/problem+json');",
+              "    const problem = pm.response.json();",
+              "    pm.expect(problem.status).to.eql(400);",
+              "    pm.expect(problem.title).to.eql('Request Validation Failed');",
+              "    pm.expect(problem.errors).to.be.an('object');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Verify Identity Document (Multipart Upload)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Correlation-Id",
+            "value": "{{$guid}}"
+          }
+        ],
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            {
+              "key": "sessionId",
+              "value": "{{sessionId}}",
+              "type": "text"
+            },
+            {
+              "key": "documentType",
+              "value": "PASSPORT",
+              "type": "text"
+            },
+            {
+              "key": "image",
+              "type": "file",
+              "src": [],
+              "description": "Attach a valid .jpg, .jpeg, or .png identity document image"
+            }
+          ]
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/compliance/verify",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "compliance",
+            "verify"
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Returns 200 OK for valid image upload', function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "",
+              "pm.test('Response includes document metadata and verification reference', function () {",
+              "    const json = pm.response.json();",
+              "    pm.expect(json.sessionId).to.eql(pm.variables.get('sessionId'));",
+              "    pm.expect(json.documentType).to.eql('PASSPORT');",
+              "    pm.expect(json.verificationReference).to.be.a('string').and.not.empty;",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Webhook Callback - Verification Success (HMAC Signed)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"eventId\": \"evt-success-{{$timestamp}}\",\n  \"eventType\": \"ONBOARDING_FINISHED\",\n  \"interviewId\": \"{{sessionId}}\",\n  \"status\": \"success\",\n  \"externalCustomerId\": \"{{externalCustomerId}}\",\n  \"timestamp\": \"2026-11-11T18:00:00Z\",\n  \"details\": {\n    \"idVerification\": \"PASSED\",\n    \"livenessCheck\": \"PASSED\"\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/compliance/webhook/callback",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "compliance",
+            "webhook",
+            "callback"
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const rawTemplate = pm.request.body.raw;",
+              "const resolvedBody = pm.variables.replaceIn(rawTemplate);",
+              "pm.request.body.raw = resolvedBody;",
+              "const secret = pm.environment.get('webhookSecret') || pm.collectionVariables.get('webhookSecret');",
+              "const signature = CryptoJS.HmacSHA256(resolvedBody, secret).toString(CryptoJS.enc.Hex);",
+              "pm.request.headers.upsert({ key: 'X-Incode-Signature', value: signature });"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Webhook returns immediate 200 OK', function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "",
+              "pm.test('Webhook acknowledgement reflects SUCCESS status', function () {",
+              "    const json = pm.response.json();",
+              "    pm.expect(json.acknowledged).to.eql(true);",
+              "    pm.expect(json.status).to.eql('SUCCESS');",
+              "    pm.expect(json.sessionId).to.be.a('string').and.not.empty;",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "6. Webhook Callback - Review Needed (HMAC sha256= Prefixed)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"eventId\": \"evt-review-{{$timestamp}}\",\n  \"eventType\": \"MANUAL_REVIEW_REQUIRED\",\n  \"interviewId\": \"{{sessionId}}\",\n  \"status\": \"review_needed\",\n  \"externalCustomerId\": \"{{externalCustomerId}}\",\n  \"timestamp\": \"2026-11-11T18:01:00Z\",\n  \"details\": {\n    \"reason\": \"document_glare\"\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/compliance/webhook/callback",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "compliance",
+            "webhook",
+            "callback"
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const rawTemplate = pm.request.body.raw;",
+              "const resolvedBody = pm.variables.replaceIn(rawTemplate);",
+              "pm.request.body.raw = resolvedBody;",
+              "const secret = pm.environment.get('webhookSecret') || pm.collectionVariables.get('webhookSecret');",
+              "const signature = 'sha256=' + CryptoJS.HmacSHA256(resolvedBody, secret).toString(CryptoJS.enc.Hex);",
+              "pm.request.headers.upsert({ key: 'X-Incode-Signature', value: signature });"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Webhook returns immediate 200 OK', function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "",
+              "pm.test('Webhook acknowledgement reflects REVIEW_NEEDED status', function () {",
+              "    const json = pm.response.json();",
+              "    pm.expect(json.acknowledged).to.eql(true);",
+              "    pm.expect(json.status).to.eql('REVIEW_NEEDED');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "7. Webhook Callback - Invalid Signature (401 Problem Detail)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "X-Incode-Signature",
+            "value": "invalid-hmac-signature-0000"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"eventId\": \"evt-spoofed\",\n  \"eventType\": \"ONBOARDING_FINISHED\",\n  \"interviewId\": \"{{sessionId}}\",\n  \"status\": \"fail\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/compliance/webhook/callback",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "compliance",
+            "webhook",
+            "callback"
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Rejects invalid HMAC signature with 401 Unauthorized', function () {",
+              "    pm.response.to.have.status(401);",
+              "});",
+              "",
+              "pm.test('Returns RFC 7807 Problem Detail', function () {",
+              "    pm.expect(pm.response.headers.get('Content-Type')).to.include('application/problem+json');",
+              "    const problem = pm.response.json();",
+              "    pm.expect(problem.status).to.eql(401);",
+              "    pm.expect(problem.title).to.eql('Webhook Signature Verification Failed');",
+              "});"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}
+

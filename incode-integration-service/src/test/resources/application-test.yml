@@ -1,0 +1,14 @@
+incode:
+  integration:
+    base-url: https://sandbox-test.incodesmile.com
+    api-key: test-api-key-12345
+    api-version: "1.0"
+    connect-timeout: 1000
+    read-timeout: 2000
+    webhook:
+      secret: test-webhook-secret-999
+      signature-header: X-Incode-Signature
+    tls:
+      verify-hostname: true
+      protocol: TLSv1.3
+
